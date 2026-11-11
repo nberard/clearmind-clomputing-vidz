@@ -1,0 +1,5 @@
+requests>=2.31
+numpy>=1.26
+psutil>=5.9
+# For GPU jobs on a gaming PC, also install PyTorch with CUDA:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121

@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vibegen Grid</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root {
+    --bg:#0b0f14; --card:#131a23; --line:#223042; --text:#eef3f8; --muted:#8597a9;
+    --accent:#ffcf3f; --green:#3fdc8b; --red:#ff6b6b; --blue:#59b8ff;
+  }
+  * { box-sizing:border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--text); font:15px/1.35 system-ui, -apple-system, sans-serif; }
+  /* 9:16 column, scales to the phone screen for screen recording */
+  main { max-width:540px; margin:0 auto; padding:16px; display:flex; flex-direction:column; gap:12px; }
+  header { display:flex; justify-content:space-between; align-items:center; }
+  h1 { margin:0; font-size:22px; letter-spacing:-.02em; }
+  h1 span { color:var(--accent); }
+  .pill { font-size:12px; padding:4px 10px; border-radius:99px; background:var(--card); color:var(--muted); }
+  .pill.live { color:var(--green); }
+  .card { background:var(--card); border-radius:16px; padding:14px; }
+  .k { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+  .kpis { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; }
+  .kpi { background:var(--card); border-radius:14px; padding:10px; text-align:center; }
+  .kpi b { display:block; font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+  .kpi.hl b { color:var(--accent); }
+  #devices { display:flex; flex-wrap:wrap; gap:8px; }
+  .dev { flex:0 0 calc(25% - 6px); min-width:0; text-align:center; padding:8px 4px; border-radius:12px; background:#0e141b; border:1px solid var(--line); transition:all .3s; }
+  .dev .ic { font-size:30px; filter:grayscale(1) opacity(.5); transition:filter .3s; }
+  .dev.busy { border-color:var(--green); box-shadow:0 0 16px rgba(63,220,139,.35); }
+  .dev.busy .ic, .dev.idle .ic { filter:none; }
+  .dev.off { opacity:.35; }
+  .dev .n { font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dev .c { font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .dev.new { animation:pop .8s ease; }
+  @keyframes pop { 0% { transform:scale(.4); } 60% { transform:scale(1.15); } 100% { transform:scale(1); } }
+  .bar { margin:7px 0; }
+  .bar .t { display:flex; justify-content:space-between; font-size:13px; }
+  .bar .t em { font-style:normal; color:var(--red); font-size:12px; }
+  .track { height:8px; background:#0e141b; border-radius:9px; overflow:hidden; margin-top:3px; }
+  .fill { height:100%; background:var(--green); border-radius:9px; transition:width .5s; }
+  .fill.gpu { background:var(--blue); }
+  canvas { width:100%; display:block; }
+  .stage { display:grid; grid-template-columns:110px 1fr 54px; gap:8px; align-items:center; margin:6px 0; font-size:13px; }
+  .stage .lbl { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .stage .x { text-align:right; font-weight:800; color:var(--accent); font-variant-numeric:tabular-nums; }
+  #toast { position:fixed; left:50%; top:24px; transform:translate(-50%, -150%); background:var(--accent); color:#111; font-weight:800; padding:12px 20px; border-radius:99px; font-size:18px; transition:transform .4s; z-index:9; white-space:nowrap; }
+  #toast.show { transform:translate(-50%, 0); }
+  #controls { display:flex; flex-wrap:wrap; gap:8px; }
+  #controls select, #controls button { padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:#0e141b; color:var(--text); font-size:14px; }
+  #controls button.primary { background:var(--accent); color:#111; border:0; font-weight:700; }
+  #join { display:flex; gap:14px; align-items:center; }
+  #qr { background:#fff; padding:6px; border-radius:10px; flex:0 0 auto; }
+  #qr img, #qr canvas { width:96px !important; height:96px !important; }
+  #joinurl { font-size:12px; color:var(--muted); word-break:break-all; }
+  body.story #controls, body.story .admin { display:none !important; }
+  .empty { color:var(--muted); font-size:13px; text-align:center; padding:8px; }
+</style>
+</head>
+<body>
+<div id="toast"></div>
+<main>
+  <header>
+    <h1>vibegen <span>grid</span></h1>
+    <span class="pill" id="state">idle</span>
+  </header>
+
+  <div class="kpis">
+    <div class="kpi"><span class="k">Devices</span><b id="k-dev">0</b></div>
+    <div class="kpi hl"><span class="k">Units/min</span><b id="k-rate">0</b></div>
+    <div class="kpi"><span class="k">Done</span><b id="k-done">0%</b></div>
+    <div class="kpi"><span class="k">ETA</span><b id="k-eta">–</b></div>
+  </div>
+
+  <div class="card">
+    <div class="k" style="margin-bottom:8px">Devices on the grid</div>
+    <div id="devices"><div class="empty">No device yet. Scan the QR code to join.</div></div>
+  </div>
+
+  <div class="card">
+    <div class="k">Throughput: watch it jump when a device joins</div>
+    <canvas id="chart" height="220"></canvas>
+  </div>
+
+  <div class="card">
+    <div class="k" style="margin-bottom:4px">Speedup per stage</div>
+    <div id="stages"><div class="empty">Start a run, then add devices one by one.</div></div>
+  </div>
+
+  <div class="card">
+    <div class="k" style="margin-bottom:2px">Pipeline</div>
+    <div id="pipeline"><div class="empty">No run yet.</div></div>
+  </div>
+
+  <div class="card admin" id="joincard">
+    <div id="join"><div id="qr"></div><div><b>Join from your phone</b><div id="joinurl"></div></div></div>
+  </div>
+
+  <div id="controls" class="admin" hidden>
+    <select id="preset">
+      <option value="demo">demo (CPU + GPU jobs)</option>
+      <option value="cpu_only">cpu_only (no GPU needed)</option>
+      <option value="full">full (long)</option>
+    </select>
+    <button class="primary" id="startbtn">▶ Start run</button>
+    <button id="resetbtn">Reset</button>
+    <button id="storybtn">Story mode</button>
+    <button id="pngbtn">⬇ Story PNG</button>
+  </div>
+</main>
+
+<script>
+const params = new URLSearchParams(location.search);
+const TOKEN = params.get("token");
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let data = null, lastEventT = null, knownDevices = new Set();
+
+if (params.get("story")) document.body.classList.add("story");
+if (TOKEN) {
+  $("controls").hidden = false;
+  const url = `${location.origin}/join?token=${encodeURIComponent(TOKEN)}`;
+  $("joinurl").textContent = url;
+  if (window.QRCode) new QRCode($("qr"), { text:url, width:192, height:192 });
+} else {
+  $("joincard").hidden = true;
+}
+
+async function admin(path, body = {}) {
+  await fetch(path, { method:"POST", headers:{ "Content-Type":"application/json", "X-Grid-Token":TOKEN }, body:JSON.stringify(body) });
+  poll();
+}
+$("startbtn").onclick = () => admin("/api/runs", { preset:$("preset").value });
+$("resetbtn").onclick = () => confirm("Reset all metrics?") && admin("/api/reset");
+$("storybtn").onclick = () => document.body.classList.toggle("story");
+$("pngbtn").onclick = exportStory;
+
+function fmtTime(s) {
+  if (s == null || !isFinite(s)) return "–";
+  s = Math.round(s);
+  if (s < 60) return s + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m" + String(s % 60).padStart(2, "0");
+  return Math.floor(s / 3600) + "h" + String(Math.floor(s % 3600 / 60)).padStart(2, "0");
+}
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove("show"), 2500);
+}
+
+function render() {
+  const d = data, online = d.clients.filter(c => c.online);
+  const total = d.run ? d.run.total_units : 0;
+  $("k-dev").textContent = online.length;
+  $("k-rate").textContent = Math.round(d.rate);
+  $("k-done").textContent = total ? Math.floor(d.done_units / total * 100) + "%" : "0%";
+  $("k-eta").textContent = d.run?.finished ? "✓" : d.blocked.length ? "⏸" : fmtTime(d.eta);
+
+  const st = $("state");
+  if (!d.run) { st.textContent = "idle"; st.className = "pill"; }
+  else if (d.run.finished) { st.textContent = "✓ done in " + fmtTime(d.elapsed); st.className = "pill live"; }
+  else { st.textContent = "● live " + fmtTime(d.elapsed); st.className = "pill live"; }
+
+  // Devices
+  if (d.clients.length) {
+    $("devices").innerHTML = d.clients.map(c => {
+      const cls = !c.online ? "off" : c.busy ? "busy" : "idle";
+      const isNew = !knownDevices.has(c.id) ? " new" : "";
+      return `<div class="dev ${cls}${isNew}" title="score ${c.score ?? "?"}${c.gpu ? " · " + c.gpu : ""}">
+        <div class="ic">${c.icon}</div><div class="n">${esc(c.name)}</div><div class="c">${c.done} jobs</div></div>`;
+    }).join("");
+    d.clients.forEach(c => knownDevices.add(c.id));
+  }
+
+  // Join / leave toasts
+  for (const e of d.events) {
+    if (lastEventT !== null && e.t > lastEventT) {
+      if (e.type === "join") toast(`${e.icon} ${e.name} joined!`);
+      if (e.type === "leave") toast(`${e.icon} ${e.name} left`);
+      if (e.type === "run_done") toast("✓ " + e.text);
+    }
+  }
+  if (d.events.length) lastEventT = d.events[d.events.length - 1].t;
+  else if (lastEventT === null) lastEventT = 0;
+
+  // Pipeline bars
+  const types = Object.values(d.by_type);
+  $("pipeline").innerHTML = types.length ? types.map(t => {
+    const pct = t.total ? t.done / t.total * 100 : 0;
+    const waiting = t.done + t.running < t.total && !t.eligible;
+    return `<div class="bar"><div class="t"><span>${t.gpu ? "⚡ " : ""}${t.label}</span>
+      <span>${waiting ? "<em>waiting for GPU</em> " : ""}${t.done}/${t.total}</span></div>
+      <div class="track"><div class="fill ${t.gpu ? "gpu" : ""}" style="width:${pct}%"></div></div></div>`;
+  }).join("") : `<div class="empty">No run yet.</div>`;
+
+  renderStages($("stages"), d.stages);
+  drawChart($("chart"), d, 1);
+}
+
+function stagesWithSpeedup(stages) {
+  const base = stages.find(s => s.units_per_min > 0)?.units_per_min || 0;
+  return stages.map(s => ({ ...s, x: base ? s.units_per_min / base : 0 }));
+}
+
+function renderStages(el, stages) {
+  const list = stagesWithSpeedup(stages);
+  if (!list.length) return;
+  const max = Math.max(...list.map(s => s.units_per_min), 1);
+  el.innerHTML = list.map(s => `<div class="stage">
+      <div class="lbl" title="${esc(s.label)}">${s.icons || "∅"} <span style="color:var(--muted)">${s.clients}</span></div>
+      <div class="track" style="height:14px"><div class="fill" style="width:${s.units_per_min / max * 100}%;background:var(--accent)"></div></div>
+      <div class="x">${s.x ? "×" + s.x.toFixed(1) : "0"}</div></div>`).join("");
+}
+
+function drawChart(cv, d, scale) {
+  const dpr = scale === 1 ? (window.devicePixelRatio || 1) : 1;
+  const W = (scale === 1 ? cv.clientWidth : cv.width / dpr), H = scale === 1 ? 220 : cv.height;
+  if (scale === 1) { cv.width = W * dpr; cv.height = H * dpr; }
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+  const pad = { l:36 * scale, r:10 * scale, t:26 * scale, b:22 * scale };
+  const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+  const s = d.samples;
+  const tmax = Math.max(d.elapsed, s.length ? s[s.length - 1].t : 0, 10);
+  const rmax = Math.max(...s.map(p => p.rate), 10) * 1.15;
+  const cmax = Math.max(...s.map(p => p.clients), 1);
+  const X = t => pad.l + t / tmax * pw, Y = r => pad.t + ph - r / rmax * ph;
+
+  g.font = `${11 * scale}px system-ui`; g.fillStyle = css("--muted"); g.strokeStyle = css("--line"); g.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const v = rmax * i / 4, y = Y(v);
+    g.beginPath(); g.moveTo(pad.l, y); g.lineTo(W - pad.r, y); g.stroke();
+    g.fillText(Math.round(v), 2 * scale, y + 4 * scale);
+  }
+  g.fillText(fmtTime(0), pad.l, H - 4 * scale);
+  g.textAlign = "right"; g.fillText(fmtTime(tmax), W - pad.r, H - 4 * scale); g.textAlign = "left";
+
+  if (s.length > 1) {
+    // client count as a faint step area
+    g.fillStyle = "rgba(89,184,255,.10)";
+    g.beginPath(); g.moveTo(X(s[0].t), pad.t + ph);
+    s.forEach((p, i) => { const y = pad.t + ph - p.clients / cmax * ph * .9; if (i) g.lineTo(X(p.t), g._y); g.lineTo(X(p.t), y); g._y = y; });
+    g.lineTo(X(s[s.length - 1].t), pad.t + ph); g.closePath(); g.fill();
+
+    // throughput line
+    const grad = g.createLinearGradient(0, pad.t, 0, pad.t + ph);
+    grad.addColorStop(0, "rgba(255,207,63,.35)"); grad.addColorStop(1, "rgba(255,207,63,0)");
+    g.beginPath(); g.moveTo(X(s[0].t), Y(s[0].rate)); s.forEach(p => g.lineTo(X(p.t), Y(p.rate)));
+    g.lineTo(X(s[s.length - 1].t), pad.t + ph); g.lineTo(X(s[0].t), pad.t + ph); g.closePath();
+    g.fillStyle = grad; g.fill();
+    g.beginPath(); g.moveTo(X(s[0].t), Y(s[0].rate)); s.forEach(p => g.lineTo(X(p.t), Y(p.rate)));
+    g.strokeStyle = css("--accent"); g.lineWidth = 2.5 * scale; g.stroke();
+  }
+
+  // join / leave markers
+  if (d.run) {
+    g.font = `${16 * scale}px system-ui`; g.textAlign = "center";
+    for (const e of d.events) {
+      if (e.type !== "join" && e.type !== "leave") continue;
+      const t = e.t - d.run.started;
+      if (t < 0 || t > tmax) continue;
+      const x = X(t);
+      g.strokeStyle = e.type === "join" ? "rgba(63,220,139,.6)" : "rgba(255,107,107,.6)";
+      g.setLineDash([3 * scale, 3 * scale]); g.lineWidth = 1;
+      g.beginPath(); g.moveTo(x, pad.t); g.lineTo(x, pad.t + ph); g.stroke(); g.setLineDash([]);
+      g.fillText(e.icon, x, pad.t - 6 * scale);
+    }
+    g.textAlign = "left";
+  }
+}
+
+function exportStory() {
+  if (!data) return;
+  const W = 1080, H = 1920, cv = document.createElement("canvas");
+  cv.width = W; cv.height = H;
+  const g = cv.getContext("2d");
+  g.fillStyle = css("--bg"); g.fillRect(0, 0, W, H);
+  g.fillStyle = css("--text"); g.font = "800 76px system-ui"; g.fillText("vibegen", 80, 200);
+  g.fillStyle = css("--accent"); g.fillText("grid", 80 + g.measureText("vibegen ").width, 200);
+  g.fillStyle = css("--muted"); g.font = "36px system-ui";
+  g.fillText("What happens when more devices join?", 80, 270);
+
+  const list = stagesWithSpeedup(data.stages);
+  const best = list.reduce((m, s) => Math.max(m, s.x), 0);
+  g.fillStyle = css("--text"); g.font = "800 150px system-ui"; g.fillText(best ? "×" + best.toFixed(1) : "–", 80, 470);
+  g.fillStyle = css("--muted"); g.font = "36px system-ui"; g.fillText("faster than the first device alone", 80, 525);
+
+  // stage bars
+  const max = Math.max(...list.map(s => s.units_per_min), 1);
+  // rows shrink to fit the space between the headline and the chart
+  const rows = list.filter(s => s.clients > 0).slice(-8);
+  const top = 600, bottom = H - 720, rowH = Math.min(130, (bottom - top) / Math.max(rows.length, 1));
+  const k = rowH / 130;
+  let y = top;
+  for (const s of rows) {
+    g.font = `${Math.round(44 * k)}px system-ui`; g.fillStyle = css("--text"); g.fillText(s.icons, 80, y + 40 * k);
+    g.fillStyle = "#0e141b"; roundRect(g, 80, y + 60 * k, 760, 30 * k, 15 * k);
+    g.fillStyle = css("--accent"); roundRect(g, 80, y + 60 * k, Math.max(30 * k, 760 * s.units_per_min / max), 30 * k, 15 * k);
+    g.font = `800 ${Math.round(46 * k)}px system-ui`; g.textAlign = "right";
+    g.fillText(s.x ? "×" + s.x.toFixed(1) : "0", W - 80, y + 92 * k); g.textAlign = "left";
+    y += rowH;
+  }
+
+  // chart at the bottom
+  const cc = document.createElement("canvas"); cc.width = 920; cc.height = 520;
+  drawChart(cc, data, 2);
+  g.drawImage(cc, 80, H - 660);
+  g.fillStyle = css("--muted"); g.font = "30px system-ui";
+  g.fillText(`${data.clients.length} devices · ${fmtTime(data.elapsed)} · ${Math.round(data.done_units)} work units`, 80, H - 90);
+
+  const a = document.createElement("a");
+  a.download = "vibegen-story.png"; a.href = cv.toDataURL("image/png"); a.click();
+}
+
+function roundRect(g, x, y, w, h, r) { g.beginPath(); g.roundRect(x, y, w, h, r); g.fill(); }
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c])); }
+
+async function poll() {
+  try { data = await (await fetch("/api/stats")).json(); render(); } catch (e) { $("state").textContent = "offline"; }
+}
+poll(); setInterval(poll, 1000);
+window.addEventListener("resize", () => data && drawChart($("chart"), data, 1));
+</script>
+</body>
+</html>

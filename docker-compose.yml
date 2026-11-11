@@ -1,0 +1,22 @@
+services:
+  grid:
+    build: .
+    restart: unless-stopped
+    environment:
+      GRID_TOKEN: ${GRID_TOKEN:?set GRID_TOKEN in .env}
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  # HTTPS in front of the app (needed for phones: wake lock only works on https).
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    command: caddy reverse-proxy --from ${GRID_DOMAIN:?set GRID_DOMAIN in .env} --to grid:8000
+    volumes:
+      - caddy_data:/data
+
+volumes:
+  caddy_data:

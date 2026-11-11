@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Join the grid</title>
+<style>
+  :root { --bg:#0b0f14; --card:#141b24; --text:#eef3f8; --muted:#8a99a8; --accent:#ffcf3f; --ok:#3fdc8b; --bad:#ff6b6b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.4 system-ui, sans-serif; padding:24px 16px; }
+  main { max-width:420px; margin:0 auto; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  p { color:var(--muted); margin:0 0 20px; }
+  .card { background:var(--card); border-radius:16px; padding:16px; margin-bottom:14px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input, select { width:100%; padding:12px; border-radius:10px; border:1px solid #263241; background:#0e141b; color:var(--text); font-size:16px; }
+  button { width:100%; padding:16px; border:0; border-radius:12px; background:var(--accent); color:#111; font-size:18px; font-weight:700; margin-top:16px; }
+  button.stop { background:#263241; color:var(--text); }
+  .big { font-size:44px; font-weight:800; font-variant-numeric:tabular-nums; }
+  .row { display:flex; justify-content:space-between; gap:12px; }
+  .row div { flex:1; }
+  .k { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  #status { font-weight:600; }
+  #log { font:13px ui-monospace, monospace; color:var(--muted); max-height:200px; overflow:auto; white-space:pre-wrap; }
+  .pulse { display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--muted); margin-right:6px; }
+  .pulse.on { background:var(--ok); box-shadow:0 0 12px var(--ok); }
+</style>
+</head>
+<body>
+<main>
+  <h1>🌴 Join the grid</h1>
+  <p>Your device will help build the video. Keep this page open and the screen on.</p>
+
+  <div class="card" id="setup">
+    <label for="name">Device name</label>
+    <input id="name" maxlength="20">
+    <label for="kind">Type</label>
+    <select id="kind">
+      <option value="phone">📱 Phone</option>
+      <option value="browser">🌐 Tablet / other</option>
+      <option value="laptop">💻 Laptop</option>
+      <option value="desktop">🖥️ Desktop</option>
+      <option value="oldpc">🧓 Old PC</option>
+    </select>
+    <button id="go">Join</button>
+  </div>
+
+  <div class="card" id="live" hidden>
+    <div><span class="pulse" id="dot"></span><span id="status">Starting…</span></div>
+    <div class="row" style="margin-top:12px">
+      <div><div class="k">Jobs done</div><div class="big" id="done">0</div></div>
+      <div><div class="k">Speed score</div><div class="big" id="score">–</div></div>
+    </div>
+    <button class="stop" id="stop">Leave the grid</button>
+  </div>
+
+  <div class="card"><div id="log"></div></div>
+</main>
+
+<script>
+// Same calibration idea as the Python agent: 1 unit ~ 1 s on a score-100 device.
+const REF_JS = 3500; // 64x64 matmuls per unit
+const params = new URLSearchParams(location.search);
+const TOKEN = params.get("token") || "";
+const $ = id => document.getElementById(id);
+const isPhone = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+$("name").value = (isPhone ? (/(iPhone|iPad)/.exec(navigator.userAgent)?.[1] || "Android") : "Browser")
+  + "-" + Math.random().toString(36).slice(2, 5);
+$("kind").value = isPhone ? "phone" : "laptop";
+
+const log = msg => { $("log").textContent = new Date().toLocaleTimeString() + "  " + msg + "\n" + $("log").textContent; };
+
+// Matmul runs in a Web Worker so the page stays responsive.
+const workerSrc = `
+  const N = 64, a = new Float32Array(N*N).map(Math.random), c = new Float32Array(N*N);
+  function mm(){ for(let i=0;i<N;i++) for(let k=0;k<N;k++){ const v=a[i*N+k]; for(let j=0;j<N;j++) c[i*N+j]+=v*a[k*N+j]; } }
+  onmessage = e => {
+    if (e.data.bench) { let n=0, t=performance.now(); while(performance.now()-t<2000){ mm(); n++; } postMessage({rate:n/((performance.now()-t)/1000)}); }
+    else { const n = Math.round(e.data.units * ${REF_JS}); const t=performance.now(); for(let i=0;i<n;i++) mm(); postMessage({secs:(performance.now()-t)/1000}); }
+  };`;
+const worker = new Worker(URL.createObjectURL(new Blob([workerSrc], {type:"text/javascript"})));
+const work = msg => new Promise(res => { worker.onmessage = e => res(e.data); worker.postMessage(msg); });
+
+async function api(path, body) {
+  const r = await fetch(path, { method:"POST", headers:{ "Content-Type":"application/json", "X-Grid-Token":TOKEN }, body:JSON.stringify(body) });
+  if (r.status === 404) throw Object.assign(new Error("re-register"), { reregister:true });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+
+let running = false, cid = null, caps = null, wakeLock = null, done = 0;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function keepAwake() {
+  try { wakeLock = await navigator.wakeLock?.request("screen"); } catch (e) { log("Screen may sleep: keep it on manually"); }
+}
+document.addEventListener("visibilitychange", () => { if (running && document.visibilityState === "visible") keepAwake(); });
+
+async function register() {
+  cid = (await api("/api/register", { name:$("name").value, kind:$("kind").value, caps })).client_id;
+  log("Joined as " + $("name").value);
+}
+
+async function start() {
+  if (!TOKEN) { log("Missing token: open the link from the dashboard QR code"); return; }
+  $("setup").hidden = true; $("live").hidden = false;
+  running = true; keepAwake();
+  $("status").textContent = "Benchmarking…";
+  const rate = (await work({ bench:true })).rate;
+  caps = { score: Math.round(rate / REF_JS * 100), native:false, gpu:false,
+           cores: navigator.hardwareConcurrency || 0, ram_gb: navigator.deviceMemory || 0, browser:true };
+  $("score").textContent = caps.score;
+  try { await register(); } catch (e) { $("status").textContent = "Could not join: " + e.message; return; }
+  const hb = setInterval(() => api("/api/heartbeat", { client_id:cid }).catch(() => {}), 5000);
+  let idle = 1000;
+  while (running) {
+    try {
+      const { job } = await api("/api/pull", { client_id:cid });
+      if (!job) { $("status").textContent = "Waiting for work…"; $("dot").className = "pulse"; await sleep(idle); idle = Math.min(idle * 1.5, 5000); continue; }
+      idle = 1000;
+      $("status").textContent = "Working: " + job.type; $("dot").className = "pulse on";
+      const { secs } = await work({ units: job.units });
+      await api("/api/done", { client_id:cid, job_id:job.id, ok:true, seconds:secs, result:{} });
+      $("done").textContent = ++done;
+      log(`${job.type} ${job.units}u in ${secs.toFixed(1)}s`);
+    } catch (e) {
+      if (e.reregister) { await register().catch(() => {}); continue; }
+      $("status").textContent = "Connection lost, retrying…"; await sleep(3000);
+    }
+  }
+  clearInterval(hb);
+}
+
+$("go").onclick = start;
+const leave = () => cid && navigator.sendBeacon(`/api/leave?token=${encodeURIComponent(TOKEN)}`,
+  new Blob([JSON.stringify({ client_id:cid })], { type:"application/json" }));
+window.addEventListener("pagehide", leave);
+$("stop").onclick = () => { leave(); running = false; wakeLock?.release(); $("status").textContent = "Left the grid"; $("dot").className = "pulse"; };
+</script>
+</body>
+</html>
