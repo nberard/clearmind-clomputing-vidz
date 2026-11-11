@@ -23,12 +23,12 @@ services:
 
   # Data stack: Airflow schedules ELT to BigQuery + dbt. Start with:
   #   docker compose --profile data up -d
-  # UI on http://SERVER:8080 (login: admin, password printed in the logs)
+  # UI on http://SERVER:8080 (login: AIRFLOW_ADMIN_USER / AIRFLOW_ADMIN_PASSWORD from .env)
   airflow:
     profiles: [data]
     build: ./airflow
     restart: unless-stopped
-    command: standalone
+    entrypoint: ["bash", "/opt/vibegen/airflow/start.sh"]
     environment:
       GRID_SERVER: http://grid:8000
       GRID_TOKEN: ${GRID_TOKEN}
@@ -36,6 +36,9 @@ services:
       BQ_RAW_DATASET: ${BQ_RAW_DATASET:-grid_raw}
       BQ_DATASET: ${BQ_DATASET:-grid_analytics}
       BQ_LOCATION: ${BQ_LOCATION:-EU}
+      AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:-}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-}
+      AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL:-}
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DAGS_FOLDER: /opt/vibegen/airflow/dags
     volumes:

@@ -151,7 +151,7 @@ finished job and 5-second throughput sample to `data/*.jsonl`.
 2. Set `GCP_PROJECT` in `.env`.
 3. Start it: `docker compose --profile data up -d` (add `--profile caddy` only if ports 80/443 are free). Airflow needs about 2–4 GB of RAM.
 4. Open the UI through an SSH tunnel: `ssh -L 8080:localhost:8080 your-server`,
-   then <http://localhost:8080>. The admin password is in `docker compose logs airflow`.
+   then <http://localhost:8080>. Log in with `AIRFLOW_ADMIN_USER` / `AIRFLOW_ADMIN_PASSWORD` from `.env`.
 
 **Try it without GCP (DuckDB):**
 ```bash
