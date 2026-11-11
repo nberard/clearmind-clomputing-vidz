@@ -55,13 +55,16 @@ order with `--plan "phone,phone+phone+phone,oldpc,gaming"`.
 On a small VPS with Docker, and a domain pointing to it:
 
 ```bash
-git clone <this repo> && cd vibegen-grid
-cp .env.example .env   # set GRID_TOKEN and GRID_DOMAIN
-docker compose up -d
+git clone <this repo> && cd clearmind-clomputing-vidz
+cp .env.example .env   # set GRID_TOKEN (and GRID_DOMAIN)
+docker compose up -d   # starts the grid on 127.0.0.1:8000
 ```
 
-Caddy gets an HTTPS certificate automatically. HTTPS is needed so phones can
-keep the screen awake.
+Then put HTTPS in front of it (phones need HTTPS to keep the screen awake):
+- **Server already runs nginx** (ports 80/443 taken): use `docs/nginx.conf` and certbot.
+- **Nothing on ports 80/443**: `docker compose --profile caddy up -d` gets a certificate automatically.
+
+Check what uses port 80 with `sudo ss -ltnp | grep -E ':(80|443) '`.
 
 Dashboard: `https://YOUR_DOMAIN/?token=YOUR_TOKEN`
 
@@ -120,7 +123,7 @@ finished job and 5-second throughput sample to `data/*.jsonl`.
 1. In GCP, create a service account with **BigQuery Data Editor** and
    **BigQuery Job User**, and save its key as `secrets/gcp-key.json`.
 2. Set `GCP_PROJECT` in `.env`.
-3. Start it: `docker compose --profile data up -d`. Airflow needs about 2–4 GB of RAM.
+3. Start it: `docker compose --profile data up -d` (add `--profile caddy` only if ports 80/443 are free). Airflow needs about 2–4 GB of RAM.
 4. Open the UI through an SSH tunnel: `ssh -L 8080:localhost:8080 your-server`,
    then <http://localhost:8080>. The admin password is in `docker compose logs airflow`.
 

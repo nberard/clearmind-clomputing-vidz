@@ -9,12 +9,15 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
 
-  # HTTPS in front of the app (needed for phones: wake lock only works on https).
+  # Optional HTTPS proxy, only if nothing else uses ports 80/443 on the server:
+  #   docker compose --profile caddy up -d
+  # Already running nginx/Apache/Traefik? Skip this and use docs/nginx.conf instead.
   caddy:
+    profiles: [caddy]
     image: caddy:2
     restart: unless-stopped
     ports: ["80:80", "443:443"]
-    command: caddy reverse-proxy --from ${GRID_DOMAIN:?set GRID_DOMAIN in .env} --to grid:8000
+    command: caddy reverse-proxy --from ${GRID_DOMAIN:-localhost} --to grid:8000
     volumes:
       - caddy_data:/data
 
