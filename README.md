@@ -89,8 +89,54 @@ Options: `--name "Nico's PC"`, `--kind oldpc` (forces the icon).
 Presets: `demo` (about 15 min with a gaming PC), `cpu_only` (no GPU needed),
 `full` (long, close to the real pipeline's size).
 
+## Data stack: Python → BigQuery → dbt, orchestrated by Airflow
+
+```
+grid server ──/api/export──▶ elt/extract.py ──▶ BigQuery grid_raw ──dbt──▶ grid_analytics
+ (jsonl log)                 (incremental)        (append-only)            (marts)
+              Airflow: grid_elt every 15 min · grid_benchmark on demand
+```
+
+**What gets stored:** the server appends every run, device, join/leave event,
+finished job and 5-second throughput sample to `data/*.jsonl`.
+`elt/extract.py` loads only the new lines into BigQuery, so it's safe to re-run.
+
+**dbt models** (`dbt/`):
+
+| Model | What it answers |
+|---|---|
+| `fct_stage_throughput` | For every stage of every run: devices online, device mix, units/min, **speedup**, **scaling efficiency** (actual vs sum of each device's speed) |
+| `mart_scaling_curve` | **The headline graph:** throughput and speedup by number of devices, GPU count, real vs simulated |
+| `mart_device_efficiency` | Speed per device kind × job type (phone vs old PC vs gaming PC) |
+| `dim_devices`, `fct_jobs` | Every device with its capabilities, every job with its device |
+
+**Airflow DAGs** (`airflow/dags/`):
+- `grid_elt`: every 15 min, extract → BigQuery, then `dbt build` (skipped when there's nothing new).
+- `grid_benchmark`: trigger from the UI with a preset and a device plan. It
+  runs the benchmark (simulated devices, or your real ones), waits for the end,
+  then triggers `grid_elt`. Run it with different plans to fill the scaling curve.
+
+**Setup on the OVH server:**
+1. In GCP, create a service account with **BigQuery Data Editor** and
+   **BigQuery Job User**, and save its key as `secrets/gcp-key.json`.
+2. Set `GCP_PROJECT` in `.env`.
+3. Start it: `docker compose --profile data up -d`. Airflow needs about 2–4 GB of RAM.
+4. Open the UI through an SSH tunnel: `ssh -L 8080:localhost:8080 your-server`,
+   then <http://localhost:8080>. The admin password is in `docker compose logs airflow`.
+
+**Try it without GCP (DuckDB):**
+```bash
+pip install -r elt/requirements.txt dbt-duckdb
+python elt/extract.py --token test --target duckdb --path grid.duckdb
+cd dbt && DBT_TARGET=local DUCKDB_PATH=../grid.duckdb dbt build --profiles-dir .
+```
+
+Connect Looker Studio (free) to `grid_analytics.mart_scaling_curve` for
+graphs you can share.
+
 ## API (for your own graphs)
 
 - `GET /api/stats`: live state (devices, stages, samples, pipeline progress)
 - `GET /api/history`: all finished runs with per-stage throughput and per-device stats
+- `GET /api/export/{runs|clients|events|jobs|samples}?offset=N`: raw rows for the warehouse (token required)
 - `POST /api/runs {"preset": "demo"}`, `POST /api/reset`: need the `X-Grid-Token` header

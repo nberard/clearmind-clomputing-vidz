@@ -3,3 +3,9 @@ data/
 __pycache__/
 *.pyc
 .venv/
+secrets/
+*.duckdb
+dbt/target/
+dbt/logs/
+logs/
+dbt/.user.yml

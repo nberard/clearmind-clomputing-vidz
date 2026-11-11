@@ -1,0 +1,36 @@
+version: 2
+
+models:
+  - name: stg_grid__runs
+    columns:
+      - name: run_id
+        data_tests: [unique, not_null]
+  - name: stg_grid__clients
+    columns:
+      - name: client_id
+        data_tests: [unique, not_null]
+      - name: device_kind
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [phone, browser, laptop, desktop, oldpc, gaming, server]
+  - name: stg_grid__events
+    columns:
+      - name: event_id
+        data_tests: [unique, not_null]
+      - name: event_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [join, leave, run_start, run_done]
+  - name: stg_grid__jobs
+    columns:
+      - name: job_id
+        data_tests: [unique, not_null]
+      - name: client_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_grid__clients')
+                field: client_id

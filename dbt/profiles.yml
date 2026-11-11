@@ -1,0 +1,19 @@
+# Used by Airflow and locally with: dbt build --profiles-dir .
+vibegen_grid:
+  target: "{{ env_var('DBT_TARGET', 'bigquery') }}"
+  outputs:
+    bigquery:
+      type: bigquery
+      # oauth = gcloud auth application-default login; service-account = key file
+      method: "{{ env_var('BQ_AUTH_METHOD', 'oauth') }}"
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS', '') }}"
+      project: "{{ env_var('GCP_PROJECT', 'set-GCP_PROJECT') }}"
+      dataset: "{{ env_var('BQ_DATASET', 'grid_analytics') }}"
+      location: "{{ env_var('BQ_LOCATION', 'EU') }}"
+      threads: 4
+      priority: interactive
+    local:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_PATH', '../grid.duckdb') }}"
+      schema: grid_analytics
+      threads: 4

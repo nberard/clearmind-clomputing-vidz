@@ -82,6 +82,18 @@ def online_clients():
     return [c for c in S.clients.values() if c["online"]]
 
 
+# ---------- raw log for the data warehouse ----------
+# Every record is appended to data/<table>.jsonl. The ELT job (elt/extract.py,
+# run by Airflow) reads them through /api/export and loads them into BigQuery.
+EXPORT_TABLES = ("runs", "clients", "events", "jobs", "samples")
+
+
+def persist(table: str, rec: dict):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with open(DATA_DIR / f"{table}.jsonl", "a") as f:
+        f.write(json.dumps(rec, separators=(",", ":")) + "\n")
+
+
 def add_event(kind: str, client: dict | None = None, text: str = ""):
     S.events.append({
         "t": now(), "type": kind, "text": text,
@@ -91,6 +103,9 @@ def add_event(kind: str, client: dict | None = None, text: str = ""):
         "icon": KIND_ICON.get(client["kind"], "❔") if client else None,
         "online": len(online_clients()),
     })
+    e = S.events[-1]
+    persist("events", {"run_id": S.run["id"] if S.run else None, "t": e["t"], "type": kind,
+                       "client_id": e["client"], "online": e["online"], "text": text})
 
 
 def can_run(caps: dict, req: dict) -> bool:
@@ -125,6 +140,8 @@ async def register(body: RegisterIn):
              "joined": now(), "left": None, "last_seen": now(), "online": True, "job": None,
              "done": 0, "units": 0.0, "busy_s": 0.0}
         S.clients[cid] = c
+        persist("clients", {"client_id": cid, "name": c["name"], "kind": c["kind"],
+                            "joined": c["joined"], "caps": c["caps"]})
         add_event("join", c)
         return {"client_id": cid}
 
@@ -220,6 +237,9 @@ async def done(body: DoneIn):
         c["units"] += job["units"]
         c["busy_s"] += job["seconds"]
         S.completions.append((t, job["units"]))
+        persist("jobs", {"run_id": S.run["id"] if S.run else None, "job_id": job["id"], "type": job["type"],
+                         "units": job["units"], "gpu_job": bool(job["req"].get("gpu")), "client_id": c["id"],
+                         "started": job["started"], "finished": t, "seconds": job["seconds"]})
         maybe_finish_run()
         return {"ok": True}
 
@@ -236,6 +256,9 @@ def maybe_finish_run():
     if r and not r.get("finished") and all(S.jobs[j]["state"] == "done" for j in r["jobs"]):
         r["finished"] = now()
         add_event("run_done", text=f"Run finished in {r['finished'] - r['started']:.0f}s")
+        persist("runs", {"run_id": r["id"], "preset": r["preset"], "started": r["started"],
+                         "finished": r["finished"], "drained": r.get("drained") or r["finished"],
+                         "total_units": r["total_units"], "jobs": len(r["jobs"])})
         save_history()
 
 
@@ -394,6 +417,25 @@ def save_history():
     f.write_text(json.dumps(hist, indent=1))
 
 
+@app.get("/api/export/{table}", dependencies=[Depends(check_token)])
+async def export(table: str, offset: int = 0, limit: int = 5000):
+    """Incremental export: rows from line `offset`. Each row carries `_line`
+    so the loader can resume from the highest line already in BigQuery."""
+    if table not in EXPORT_TABLES:
+        raise HTTPException(404, f"tables: {EXPORT_TABLES}")
+    f = DATA_DIR / f"{table}.jsonl"
+    rows = []
+    if f.exists():
+        with open(f) as fh:
+            for i, line in enumerate(fh):
+                if i < offset:
+                    continue
+                if len(rows) >= limit:
+                    break
+                rows.append({"_line": i, **json.loads(line)})
+    return {"table": table, "rows": rows, "next_offset": offset + len(rows), "more": len(rows) == limit}
+
+
 # ---------- pages ----------
 
 @app.get("/")
@@ -423,6 +465,8 @@ async def ticker():
                 S.samples.append({"t": round(t - S.run["started"], 1), "rate": round(rate_units_per_min(), 2),
                                   "clients": len(online_clients()),
                                   "busy": sum(1 for c in online_clients() if c["job"])})
+                if len(S.samples) % 5 == 0:  # one row every 5 s is plenty for the warehouse
+                    persist("samples", {"run_id": S.run["id"], "t": t, **S.samples[-1]})
             # keep memory bounded on long runs
             if len(S.completions) > 50000:
                 S.completions = S.completions[-50000:]

@@ -1,0 +1,4 @@
+requests>=2.31
+google-cloud-bigquery>=3.20
+# local testing without GCP:
+duckdb>=1.0

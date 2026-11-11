@@ -1,0 +1,36 @@
+version: 2
+
+models:
+  - name: dim_devices
+    description: Every device registration, its capabilities and its lifetime work.
+    columns:
+      - name: client_id
+        data_tests: [unique, not_null]
+      - name: units_per_busy_min
+        description: Measured speed while working (units per busy minute).
+
+  - name: fct_jobs
+    description: One row per completed job.
+    columns:
+      - name: job_id
+        data_tests: [unique, not_null]
+
+  - name: fct_stage_throughput
+    description: >
+      Each run split into stages (a new stage when a device joins or leaves).
+      Throughput skips each stage's warm-up; speedup is versus the first stage
+      that did any work; scaling_efficiency compares to the sum of the devices'
+      individual speeds.
+    data_tests:
+      - dbt_utils_free_unique_combo:
+          arguments:
+            columns: [run_id, stage_num]
+    columns:
+      - name: speedup
+      - name: scaling_efficiency
+
+  - name: mart_scaling_curve
+    description: Throughput and speedup by number of devices, across all runs. The headline graph.
+
+  - name: mart_device_efficiency
+    description: Speed per device kind and job type.

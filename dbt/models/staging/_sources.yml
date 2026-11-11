@@ -1,0 +1,12 @@
+version: 2
+
+sources:
+  - name: grid_raw
+    description: Raw grid metrics loaded by elt/extract.py (append-only, one row per server log line).
+    schema: "{{ env_var('BQ_RAW_DATASET', 'grid_raw') }}"
+    tables:
+      - name: runs
+      - name: clients
+      - name: events
+      - name: jobs
+      - name: samples

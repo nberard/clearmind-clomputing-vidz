@@ -18,5 +18,29 @@ services:
     volumes:
       - caddy_data:/data
 
+  # Data stack: Airflow schedules ELT to BigQuery + dbt. Start with:
+  #   docker compose --profile data up -d
+  # UI on http://SERVER:8080 (login: admin, password printed in the logs)
+  airflow:
+    profiles: [data]
+    build: ./airflow
+    restart: unless-stopped
+    command: standalone
+    environment:
+      GRID_SERVER: http://grid:8000
+      GRID_TOKEN: ${GRID_TOKEN}
+      GCP_PROJECT: ${GCP_PROJECT:?set GCP_PROJECT in .env}
+      BQ_RAW_DATASET: ${BQ_RAW_DATASET:-grid_raw}
+      BQ_DATASET: ${BQ_DATASET:-grid_analytics}
+      BQ_LOCATION: ${BQ_LOCATION:-EU}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/vibegen/airflow/dags
+    volumes:
+      - .:/opt/vibegen
+      - airflow_home:/opt/airflow
+    ports:
+      - "127.0.0.1:8080:8080"   # reach it with an SSH tunnel: ssh -L 8080:localhost:8080 SERVER
+
 volumes:
   caddy_data:
+  airflow_home:
