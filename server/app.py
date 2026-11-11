@@ -506,6 +506,7 @@ def snapshot():
             "job_type": S.jobs[c["job"]]["type"] if c["job"] in S.jobs else None,
             "done": c["done"], "units": round(c["units"], 1),
             "score": c["caps"].get("score"), "gpu": c["caps"].get("gpu_name") if c["caps"].get("gpu") else None,
+            "engine": c["caps"].get("engine"),
         } for c in S.clients.values() if c["online"] or c["done"]],
         "events": S.events[-30:],
         "samples": S.samples[-900:],

@@ -4,6 +4,7 @@ select
     d.device_name,
     d.device_kind,
     d.device_class,
+    d.compute_engine,
     d.is_simulated,
     j.seconds / nullif(j.units, 0)                   as seconds_per_unit
 from {{ ref('stg_grid__jobs') }} j

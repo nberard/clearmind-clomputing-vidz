@@ -42,7 +42,14 @@
       <option value="desktop">🖥️ Desktop</option>
       <option value="oldpc">🧓 Old PC</option>
     </select>
+    <label for="engine">Compute engine</label>
+    <select id="engine">
+      <option value="wasm">🦀 Rust / WebAssembly (fast)</option>
+      <option value="js">JavaScript</option>
+    </select>
     <button id="go">Join</button>
+    <button class="stop" id="compare">⚡ Compare JS vs Rust on this device</button>
+    <div id="cmp" style="margin-top:12px"></div>
   </div>
 
   <div class="card" id="live" hidden>
@@ -70,16 +77,61 @@ $("kind").value = isPhone ? "phone" : "laptop";
 
 const log = msg => { $("log").textContent = new Date().toLocaleTimeString() + "  " + msg + "\n" + $("log").textContent; };
 
-// Matmul runs in a Web Worker so the page stays responsive.
+// Matmul runs in a Web Worker so the page stays responsive. Two engines do
+// the exact same work (64x64 f32 matmuls): plain JavaScript, or the Rust
+// kernel compiled to WebAssembly (wasm-kernel/, built to /static/kernel.wasm).
 const workerSrc = `
   const N = 64, a = new Float32Array(N*N).map(Math.random), c = new Float32Array(N*N);
   function mm(){ for(let i=0;i<N;i++) for(let k=0;k<N;k++){ const v=a[i*N+k]; for(let j=0;j<N;j++) c[i*N+j]+=v*a[k*N+j]; } }
-  onmessage = e => {
-    if (e.data.bench) { let n=0, t=performance.now(); while(performance.now()-t<2000){ mm(); n++; } postMessage({rate:n/((performance.now()-t)/1000)}); }
-    else { const n = Math.round(e.data.units * ${REF_JS}); const t=performance.now(); for(let i=0;i<n;i++) mm(); postMessage({secs:(performance.now()-t)/1000}); }
+  let wasm = null;
+  const engines = {
+    js:   n => { for (let i = 0; i < n; i++) mm(); },
+    wasm: n => { while (n > 0) { const b = Math.min(n, 200); wasm.run(b); n -= b; } },
+  };
+  onmessage = async e => {
+    const d = e.data;
+    if (d.module) { wasm = (await WebAssembly.instantiate(d.module)).exports; wasm.init(42); postMessage({ ready:true }); return; }
+    const run = engines[d.engine];
+    if (d.bench) {
+      let n = 0, t = performance.now(), batch = d.engine === "wasm" ? 50 : 1;
+      while (performance.now() - t < 2000) { run(batch); n += batch; }
+      postMessage({ rate: n / ((performance.now() - t) / 1000) });
+    } else {
+      const t = performance.now(); run(Math.round(d.units * ${REF_JS})); postMessage({ secs: (performance.now() - t) / 1000 });
+    }
   };`;
 const worker = new Worker(URL.createObjectURL(new Blob([workerSrc], {type:"text/javascript"})));
 const work = msg => new Promise(res => { worker.onmessage = e => res(e.data); worker.postMessage(msg); });
+
+// Load the Rust kernel; fall back to JavaScript if WebAssembly isn't available.
+const wasmReady = (async () => {
+  try {
+    const module = await WebAssembly.compileStreaming(fetch("/static/kernel.wasm"));
+    await work({ module });
+    return true;
+  } catch (e) {
+    log("WebAssembly unavailable, using JavaScript");
+    $("engine").value = "js"; $("engine").disabled = true;
+    return false;
+  }
+})();
+
+async function benchScore(engine) {
+  return Math.round((await work({ bench:true, engine })).rate / REF_JS * 100);
+}
+
+$("compare").onclick = async () => {
+  const btn = $("compare"); btn.disabled = true;
+  $("cmp").innerHTML = "Measuring JavaScript…";
+  const js = await benchScore("js");
+  if (!(await wasmReady)) { $("cmp").textContent = "JavaScript score: " + js; btn.disabled = false; return; }
+  $("cmp").innerHTML = "Measuring Rust / WebAssembly…";
+  const w = await benchScore("wasm");
+  $("cmp").innerHTML = `<div class="row"><div><div class="k">JavaScript</div><div class="big">${js}</div></div>
+    <div><div class="k">🦀 Rust</div><div class="big" style="color:var(--accent)">${w}</div></div></div>
+    <div style="font-size:28px;font-weight:800;margin-top:8px">×${(w / js).toFixed(1)} faster</div>`;
+  btn.disabled = false;
+};
 
 async function api(path, body) {
   const r = await fetch(path, { method:"POST", headers:{ "Content-Type":"application/json", "X-Grid-Token":TOKEN }, body:JSON.stringify(body) });
@@ -106,8 +158,8 @@ async function start() {
   $("setup").hidden = true; $("live").hidden = false;
   running = true; keepAwake();
   $("status").textContent = "Benchmarking…";
-  const rate = (await work({ bench:true })).rate;
-  caps = { score: Math.round(rate / REF_JS * 100), native:false, gpu:false,
+  const engine = (await wasmReady) ? $("engine").value : "js";
+  caps = { score: await benchScore(engine), engine, native:false, gpu:false,
            cores: navigator.hardwareConcurrency || 0, ram_gb: navigator.deviceMemory || 0, browser:true };
   $("score").textContent = caps.score;
   try { await register(); } catch (e) { $("status").textContent = "Could not join: " + e.message; return; }
@@ -119,7 +171,7 @@ async function start() {
       if (!job) { $("status").textContent = "Waiting for work…"; $("dot").className = "pulse"; await sleep(idle); idle = Math.min(idle * 1.5, 5000); continue; }
       idle = 1000;
       $("status").textContent = "Working: " + job.type; $("dot").className = "pulse on";
-      const { secs } = await work({ units: job.units });
+      const { secs } = await work({ units: job.units, engine: caps.engine });
       await api("/api/done", { client_id:cid, job_id:job.id, ok:true, seconds:secs, result:{} });
       $("done").textContent = ++done;
       log(`${job.type} ${job.units}u in ${secs.toFixed(1)}s`);

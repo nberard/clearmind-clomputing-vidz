@@ -1,7 +1,9 @@
--- Which device is good at which job: speed per device kind and job type.
+-- Which device is good at which job: speed per device kind, compute engine
+-- (js vs wasm on phones, numpy, torch) and job type.
 select
     device_kind,
     device_class,
+    compute_engine,
     job_type,
     is_gpu_job,
     is_simulated,
@@ -11,4 +13,4 @@ select
     sum(units) * 60 / nullif(sum(seconds), 0)        as units_per_busy_min,
     avg(seconds_per_unit)                            as avg_seconds_per_unit
 from {{ ref('fct_jobs') }}
-group by 1, 2, 3, 4, 5
+group by 1, 2, 3, 4, 5, 6

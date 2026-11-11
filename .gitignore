@@ -9,3 +9,4 @@ dbt/target/
 dbt/logs/
 logs/
 dbt/.user.yml
+wasm-kernel/target/

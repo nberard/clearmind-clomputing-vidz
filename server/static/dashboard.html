@@ -169,7 +169,7 @@ function render() {
       const cls = !c.online ? "off" : c.busy ? "busy" : "idle";
       const isNew = !knownDevices.has(c.id) ? " new" : "";
       return `<div class="dev ${cls}${isNew}" title="score ${c.score ?? "?"}${c.gpu ? " · " + c.gpu : ""}">
-        <div class="ic">${c.icon}</div><div class="n">${esc(c.name)}</div><div class="c">${c.done} jobs</div></div>`;
+        <div class="ic">${c.icon}</div><div class="n">${c.engine === "wasm" ? "🦀 " : ""}${esc(c.name)}</div><div class="c">${c.done} jobs</div></div>`;
     }).join("");
     d.clients.forEach(c => knownDevices.add(c.id));
   }

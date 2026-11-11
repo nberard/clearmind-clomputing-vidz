@@ -28,7 +28,8 @@ SCHEMAS = {
     "clients": [("_line", "INT64"), ("client_id", "STRING"), ("name", "STRING"), ("kind", "STRING"),
                 ("joined", "FLOAT64"), ("cpu_score", "FLOAT64"), ("has_gpu", "BOOL"), ("gpu_name", "STRING"),
                 ("vram_gb", "FLOAT64"), ("gpu_score", "FLOAT64"), ("native", "BOOL"), ("is_browser", "BOOL"),
-                ("is_simulated", "BOOL"), ("cores", "INT64"), ("ram_gb", "FLOAT64"), ("os", "STRING")],
+                ("is_simulated", "BOOL"), ("cores", "INT64"), ("ram_gb", "FLOAT64"), ("os", "STRING"),
+                ("engine", "STRING")],
     "events": [("_line", "INT64"), ("run_id", "STRING"), ("t", "FLOAT64"), ("type", "STRING"),
                ("client_id", "STRING"), ("online", "INT64"), ("text", "STRING")],
     "jobs": [("_line", "INT64"), ("run_id", "STRING"), ("job_id", "STRING"), ("type", "STRING"),
@@ -50,7 +51,8 @@ def flatten(table: str, row: dict) -> dict:
         row.update(cpu_score=caps.get("score"), has_gpu=bool(caps.get("gpu")), gpu_name=caps.get("gpu_name"),
                    vram_gb=caps.get("vram_gb"), gpu_score=caps.get("gpu_score"), native=bool(caps.get("native")),
                    is_browser=bool(caps.get("browser")), is_simulated=bool(caps.get("simulated")),
-                   cores=caps.get("cores"), ram_gb=caps.get("ram_gb"), os=caps.get("os"))
+                   cores=caps.get("cores"), ram_gb=caps.get("ram_gb"), os=caps.get("os"),
+                   engine=caps.get("engine") or ("torch" if caps.get("gpu") else "numpy"))
     cols = [c for c, _ in SCHEMAS[table]]
     return {c: row.get(c) for c in cols}
 
@@ -92,7 +94,10 @@ class BigQueryTarget:
 
     def load(self, table: str, rows: list[dict]):
         schema = [self.bq.SchemaField(c, t) for c, t in SCHEMAS[table]]
-        cfg = self.bq.LoadJobConfig(schema=schema, write_disposition="WRITE_APPEND")
+        cfg = self.bq.LoadJobConfig(
+            schema=schema, write_disposition="WRITE_APPEND",
+            # new columns (e.g. engine) are added to existing tables automatically
+            schema_update_options=[self.bq.SchemaUpdateOption.ALLOW_FIELD_ADDITION])
         self.client.load_table_from_json(rows, f"{self.dataset}.{table}", job_config=cfg).result()
 
 
@@ -107,6 +112,8 @@ class DuckDBTarget:
         for t, cols in SCHEMAS.items():
             ddl = ", ".join(f'"{c}" {self.TYPES[ty]}' for c, ty in cols)
             self.con.execute(f"CREATE TABLE IF NOT EXISTS {schema}.{t} ({ddl})")
+            for c, ty in cols:
+                self.con.execute(f'ALTER TABLE {schema}.{t} ADD COLUMN IF NOT EXISTS "{c}" {self.TYPES[ty]}')
 
     def max_line(self, table: str) -> int:
         m = self.con.execute(f"SELECT MAX(_line) FROM {self.schema}.{table}").fetchone()[0]

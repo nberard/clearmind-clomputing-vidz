@@ -22,5 +22,6 @@ select
     coalesce(is_simulated, false)            as is_simulated,
     cores,
     ram_gb,
-    os
+    os,
+    engine                                   as compute_engine
 from src

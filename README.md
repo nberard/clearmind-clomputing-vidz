@@ -169,3 +169,17 @@ graphs you can share.
 - `GET /api/history`: all finished runs with per-stage throughput and per-device stats
 - `GET /api/export/{runs|clients|events|jobs|samples}?offset=N`: raw rows for the warehouse (token required)
 - `POST /api/runs {"preset": "demo"}`, `POST /api/reset`: need the `X-Grid-Token` header
+
+## 🦀 Rust / WebAssembly kernel for phones
+
+`wasm-kernel/` is a small Rust crate compiled to WebAssembly (SIMD). The
+browser client runs it instead of JavaScript for the same work: same 64×64
+matrix multiplies, same results. On the join page:
+- **Compute engine:** Rust/WebAssembly (default) or JavaScript
+- **⚡ Compare JS vs Rust:** benchmarks both on the device and shows the speedup
+
+The dashboard marks Rust devices with 🦀, and `mart_device_efficiency` has a
+`compute_engine` column (js, wasm, numpy, torch) for the JS-vs-Rust graph.
+
+The compiled `server/static/kernel.wasm` is committed, so deploying needs no
+Rust. To rebuild it: `rustup target add wasm32-unknown-unknown && wasm-kernel/build.sh`.
