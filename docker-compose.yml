@@ -40,10 +40,18 @@ services:
       AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-}
       AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL:-}
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      # Light settings for a small VPS (~4 GB RAM shared with other services)
+      AIRFLOW__WEBSERVER__WORKERS: "1"
+      AIRFLOW__WEBSERVER__WEB_SERVER_WORKER_TIMEOUT: "300"
+      AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: "300"
+      AIRFLOW__CORE__PARALLELISM: "4"
+      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: "120"
+      AIRFLOW__SCHEDULER__PARSING_PROCESSES: "1"
       AIRFLOW__CORE__DAGS_FOLDER: /opt/vibegen/airflow/dags
     volumes:
       - .:/opt/vibegen
       - airflow_home:/opt/airflow
+    mem_limit: 1800m          # keep the rest of the server alive if Airflow grows
     ports:
       - "127.0.0.1:8080:8080"   # reach it with an SSH tunnel: ssh -L 8080:localhost:8080 SERVER
 
