@@ -6,6 +6,8 @@ Everything lives in memory; finished runs are saved to data/history.json.
 """
 
 import asyncio
+import base64
+import re
 import json
 import os
 import random
@@ -35,7 +37,11 @@ JOB_TYPES = {
     "gen_music":     {"label": "Music generation", "units": 60, "req": {"gpu": True, "vram_gb": 8}},
     "gen_video":     {"label": "Video clips",     "units": 120, "req": {"gpu": True, "vram_gb": 8}},
     "encode_chunk":  {"label": "Video encoding",  "units": 10,  "req": {"native": True}},
+    "style_features": {"label": "Style features", "units": 3,   "req": {}},
 }
+
+# Jobs created for each new inspiration post from the Instagram collector
+SOURCE_JOBS = ("ingest", "caption_image", "style_features")
 
 PRESETS = {
     # counts per job type, plus a scale that shrinks every job (for quick demos)
@@ -85,7 +91,8 @@ def online_clients():
 # ---------- raw log for the data warehouse ----------
 # Every record is appended to data/<table>.jsonl. The ELT job (elt/extract.py,
 # run by Airflow) reads them through /api/export and loads them into BigQuery.
-EXPORT_TABLES = ("runs", "clients", "events", "jobs", "samples")
+EXPORT_TABLES = ("runs", "clients", "events", "jobs", "samples", "sources")
+SOURCES_DIR = DATA_DIR / "sources"
 
 
 def persist(table: str, rec: dict):
@@ -270,38 +277,155 @@ class RunIn(BaseModel):
 
 @app.post("/api/runs", dependencies=[Depends(check_token)])
 async def start_run(body: RunIn):
-    if body.preset not in PRESETS:
-        raise HTTPException(400, f"presets: {list(PRESETS)}")
+    if body.preset not in PRESETS and body.preset != "sources":
+        raise HTTPException(400, f"presets: {list(PRESETS) + ['sources']}")
     async with S.lock:
-        p = PRESETS[body.preset]
-        # Drop whatever is left of the previous run.
-        for j in list(S.queue):
-            S.jobs.pop(j, None)
-        S.queue.clear()
-        S.completions.clear()
-        S.samples.clear()
-        S.events.clear()
-        S.clients = {k: c for k, c in S.clients.items() if c["online"]}
-        for c in S.clients.values():
-            c.update(done=0, units=0.0, busy_s=0.0)
-            if c["job"] not in S.jobs:
-                c["job"] = None
-        ids = []
-        for jtype, n in p["counts"].items():
-            spec = JOB_TYPES[jtype]
-            for i in range(n):
-                jid = uuid.uuid4().hex[:10]
-                S.jobs[jid] = {"id": jid, "type": jtype, "units": round(spec["units"] * p["scale"], 2),
-                               "req": spec["req"], "payload": {"index": i}, "state": "queued",
-                               "client": None, "started": None}
-                ids.append(jid)
-        random.shuffle(ids)  # mixed work, like a real pipeline with many inputs
-        S.queue.extend(ids)
-        S.run = {"id": uuid.uuid4().hex[:6], "preset": body.preset, "started": now(),
-                 "finished": None, "jobs": ids,
-                 "total_units": sum(S.jobs[j]["units"] for j in ids)}
-        add_event("run_start", text=f"Run '{body.preset}' started: {len(ids)} jobs")
-        return {"run": S.run["id"], "jobs": len(ids)}
+        return create_run(body.preset)
+
+
+def build_jobs(preset: str) -> list[dict]:
+    """Job specs for a run: fixed counts for benchmark presets, or one set of
+    jobs per not-yet-processed inspiration post for the 'sources' preset."""
+    specs = []
+    if preset == "sources":
+        for src in pending_sources():
+            for jtype in SOURCE_JOBS:
+                specs.append((jtype, JOB_TYPES[jtype]["units"],
+                              {"media_id": src["media_id"], "collection": src.get("collection_name"),
+                               "image_url": f"/api/sources/{src['media_id']}/image"}))
+        return specs
+    p = PRESETS[preset]
+    for jtype, n in p["counts"].items():
+        for i in range(n):
+            specs.append((jtype, round(JOB_TYPES[jtype]["units"] * p["scale"], 2), {"index": i}))
+    return specs
+
+
+def create_run(preset: str) -> dict:
+    specs = build_jobs(preset)
+    if not specs:
+        return {"run": None, "jobs": 0, "reason": "nothing to process"}
+    # Drop whatever is left of the previous run.
+    for j in list(S.queue):
+        S.jobs.pop(j, None)
+    S.queue.clear()
+    S.completions.clear()
+    S.samples.clear()
+    S.events.clear()
+    S.clients = {k: c for k, c in S.clients.items() if c["online"]}
+    for c in S.clients.values():
+        c.update(done=0, units=0.0, busy_s=0.0)
+        if c["job"] not in S.jobs:
+            c["job"] = None
+    ids = []
+    for jtype, units, payload in specs:
+        jid = uuid.uuid4().hex[:10]
+        S.jobs[jid] = {"id": jid, "type": jtype, "units": units, "req": JOB_TYPES[jtype]["req"],
+                       "payload": payload, "state": "queued", "client": None, "started": None}
+        ids.append(jid)
+    random.shuffle(ids)  # mixed work, like a real pipeline with many inputs
+    S.queue.extend(ids)
+    S.run = {"id": uuid.uuid4().hex[:6], "preset": preset, "started": now(),
+             "finished": None, "jobs": ids,
+             "total_units": sum(S.jobs[j]["units"] for j in ids)}
+    if preset == "sources":
+        mark_sources_processed({S.jobs[j]["payload"]["media_id"] for j in ids})
+    add_event("run_start", text=f"Run '{preset}' started: {len(ids)} jobs")
+    return {"run": S.run["id"], "jobs": len(ids)}
+
+
+# ---------- inspiration sources (Instagram collector) ----------
+
+MEDIA_ID = re.compile(r"^[0-9A-Za-z_]{1,40}$")
+
+
+def read_jsonl(name: str) -> list[dict]:
+    f = DATA_DIR / f"{name}.jsonl"
+    return [json.loads(x) for x in f.read_text().splitlines() if x.strip()] if f.exists() else []
+
+
+def processed_ids() -> set[str]:
+    f = DATA_DIR / "sources_processed.txt"
+    return set(f.read_text().split()) if f.exists() else set()
+
+
+def mark_sources_processed(ids: set[str]):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with open(DATA_DIR / "sources_processed.txt", "a") as f:
+        f.write("".join(i + "\n" for i in sorted(ids)))
+
+
+def pending_sources() -> list[dict]:
+    done = processed_ids()
+    return [s for s in read_jsonl("sources") if s["media_id"] not in done]
+
+
+class SourceItem(BaseModel):
+    media_id: str
+    code: str | None = None
+    collection_id: str | None = None
+    collection_name: str | None = None
+    media_type: int | None = None
+    taken_at: float | None = None
+    author: str | None = None
+    caption: str | None = None
+    like_count: int | None = None
+    collected_at: float | None = None
+    image_b64: str | None = None
+
+
+class SourcesIn(BaseModel):
+    items: list[SourceItem]
+    process: bool = False  # start a 'sources' run right away when the grid is idle
+
+
+@app.post("/api/sources", dependencies=[Depends(check_token)])
+async def add_sources(body: SourcesIn):
+    async with S.lock:
+        known = {s["media_id"] for s in read_jsonl("sources")}
+        SOURCES_DIR.mkdir(parents=True, exist_ok=True)
+        added, by_collection = 0, {}
+        for it in body.items:
+            if not MEDIA_ID.match(it.media_id) or it.media_id in known:
+                continue
+            if it.image_b64:
+                (SOURCES_DIR / f"{it.media_id}.jpg").write_bytes(base64.b64decode(it.image_b64))
+            rec = it.model_dump(exclude={"image_b64"})
+            rec["received_at"] = now()
+            rec["has_image"] = bool(it.image_b64)
+            persist("sources", rec)
+            known.add(it.media_id)
+            added += 1
+            name = it.collection_name or "saved"
+            by_collection[name] = by_collection.get(name, 0) + 1
+        started = None
+        if body.process and added and (not S.run or S.run.get("finished")):
+            started = create_run("sources")
+        if added:  # after create_run, which clears the event list
+            detail = ", ".join(f"{n} in {c}" for c, n in by_collection.items())
+            add_event("source", text=f"📸 {added} new inspiration{'s' if added > 1 else ''} ({detail})")
+        return {"added": added, "duplicates": len(body.items) - added, "run": started}
+
+
+@app.get("/api/sources/{media_id}/image", dependencies=[Depends(check_token)])
+async def source_image(media_id: str):
+    f = SOURCES_DIR / f"{media_id}.jpg"
+    if not MEDIA_ID.match(media_id) or not f.exists():
+        raise HTTPException(404)
+    return FileResponse(f, media_type="image/jpeg")
+
+
+class AlertIn(BaseModel):
+    level: str = "warning"
+    text: str
+
+
+@app.post("/api/alert", dependencies=[Depends(check_token)])
+async def alert(body: AlertIn):
+    """The collector reports safety stops here so they show on the dashboard."""
+    async with S.lock:
+        add_event("alert", text=f"⚠️ {body.text[:200]}")
+        return {"ok": True}
 
 
 @app.post("/api/reset", dependencies=[Depends(check_token)])

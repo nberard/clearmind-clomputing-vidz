@@ -102,6 +102,7 @@
       <option value="demo">demo (CPU + GPU jobs)</option>
       <option value="cpu_only">cpu_only (no GPU needed)</option>
       <option value="full">full (long)</option>
+      <option value="sources">sources (new Instagram inspirations)</option>
     </select>
     <button class="primary" id="startbtn">▶ Start run</button>
     <button id="resetbtn">Reset</button>
@@ -179,6 +180,7 @@ function render() {
       if (e.type === "join") toast(`${e.icon} ${e.name} joined!`);
       if (e.type === "leave") toast(`${e.icon} ${e.name} left`);
       if (e.type === "run_done") toast("✓ " + e.text);
+      if (e.type === "source" || e.type === "alert") toast(e.text);
     }
   }
   if (d.events.length) lastEventT = d.events[d.events.length - 1].t;

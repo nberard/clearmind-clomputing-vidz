@@ -22,7 +22,7 @@ models:
         data_tests:
           - accepted_values:
               arguments:
-                values: [join, leave, run_start, run_done]
+                values: [join, leave, run_start, run_done, source, alert]
   - name: stg_grid__jobs
     columns:
       - name: job_id
@@ -34,3 +34,7 @@ models:
               arguments:
                 to: ref('stg_grid__clients')
                 field: client_id
+  - name: stg_grid__sources
+    columns:
+      - name: media_id
+        data_tests: [unique, not_null]

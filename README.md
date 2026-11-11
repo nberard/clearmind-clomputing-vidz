@@ -92,6 +92,32 @@ Options: `--name "Nico's PC"`, `--kind oldpc` (forces the icon).
 Presets: `demo` (about 15 min with a gaming PC), `cpu_only` (no GPU needed),
 `full` (long, close to the real pipeline's size).
 
+## Instagram inspiration collector
+
+`collector/collector.py` copies the posts saved in your Instagram collections
+to the grid: one full pass over everything saved so far, then one sync a day.
+Each new post creates grid jobs (ingest, caption, style features) and lands in
+BigQuery (`stg_grid__sources`, `mart_inspiration_daily`).
+
+Run it **at home** (gaming PC or Raspberry Pi), not on OVH: Instagram trusts
+a home connection much more than a datacenter one. Use a secondary account.
+
+```bash
+pip install -r collector/requirements.txt
+export GRID_SERVER=https://grid.yourdomain.com GRID_TOKEN=...
+python collector/collector.py login    # once, interactive (2FA code if asked)
+python collector/collector.py init     # once: everything saved up to now
+python collector/collector.py daily    # then: one sync a day, random time 02:00-06:00
+```
+
+Options: `--collections "Summer,Reggae"` to watch only some collections, and
+`--no-process` to store posts without starting a processing run.
+
+It's read-only and stops itself before Instagram escalates:
+- **Security check or logged out:** full stop plus an alert on the dashboard.
+  Confirm in the Instagram app, then run `login` again.
+- **"Try again later":** pause 24 h. A second time means a full stop.
+
 ## Data stack: Python → BigQuery → dbt, orchestrated by Airflow
 
 ```

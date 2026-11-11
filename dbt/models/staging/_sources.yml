@@ -10,3 +10,4 @@ sources:
       - name: events
       - name: jobs
       - name: samples
+      - name: sources

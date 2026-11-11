@@ -18,7 +18,7 @@ import os
 
 import requests
 
-TABLES = ("runs", "clients", "events", "jobs", "samples")
+TABLES = ("runs", "clients", "events", "jobs", "samples", "sources")
 
 # Explicit schemas keep BigQuery types stable across loads.
 # Times are Unix epoch seconds (FLOAT64); dbt converts them to timestamps.
@@ -34,6 +34,10 @@ SCHEMAS = {
     "jobs": [("_line", "INT64"), ("run_id", "STRING"), ("job_id", "STRING"), ("type", "STRING"),
              ("units", "FLOAT64"), ("gpu_job", "BOOL"), ("client_id", "STRING"), ("started", "FLOAT64"),
              ("finished", "FLOAT64"), ("seconds", "FLOAT64")],
+    "sources": [("_line", "INT64"), ("media_id", "STRING"), ("code", "STRING"), ("collection_id", "STRING"),
+                ("collection_name", "STRING"), ("media_type", "INT64"), ("taken_at", "FLOAT64"),
+                ("author", "STRING"), ("caption", "STRING"), ("like_count", "INT64"),
+                ("collected_at", "FLOAT64"), ("received_at", "FLOAT64"), ("has_image", "BOOL")],
     "samples": [("_line", "INT64"), ("run_id", "STRING"), ("t", "FLOAT64"), ("rate", "FLOAT64"),
                 ("clients", "INT64"), ("busy", "INT64")],
 }
