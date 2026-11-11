@@ -1,0 +1,14 @@
+# Server override: puts the grid on the 'proxy' Docker network of the
+# clear-soken Caddy, so Caddy can reach it as vibegen-grid:8000 without
+# opening any port. Enabled on the server with, in .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
+services:
+  grid:
+    networks:
+      default:
+      proxy:
+        aliases: [vibegen-grid]
+
+networks:
+  proxy:
+    external: true

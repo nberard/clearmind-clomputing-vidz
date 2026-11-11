@@ -68,6 +68,22 @@ Check what uses port 80 with `sudo ss -ltnp | grep -E ':(80|443) '`.
 
 Dashboard: `https://YOUR_DOMAIN/?token=YOUR_TOKEN`
 
+### On touplitoui.me (existing clear-soken Caddy)
+
+The server already runs Caddy for `*.touplitoui.me`, so skip the `caddy`
+profile and plug the grid into it, the same way as transmission-stack:
+
+```bash
+echo "COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml" >> .env
+docker compose up -d                       # grid joins the 'proxy' network
+./deploy/publish-caddy.sh -H touplitoui.me # -> https://grid.touplitoui.me
+```
+
+No port is opened. Airflow stays private: reach it with
+`ssh -L 8080:localhost:8080 nico@touplitoui.me`. Note that
+`clearmind-tools/data-platform` also uses port 8080 for its own Airflow, so
+don't run both at once (or change one of the ports).
+
 ## 3. Add real devices
 
 | Device | How |
