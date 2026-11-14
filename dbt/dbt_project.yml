@@ -13,6 +13,8 @@ vars:
   # share of each stage skipped before measuring throughput (jobs started in
   # the previous stage are still finishing)
   stage_warmup_share: 0.3
+  # playlists whose name matches this (lowercase regex) count as reggae
+  reggae_playlist_pattern: 'reggae|roots|dub|ska|dancehall|rocksteady|lovers rock'
 
 models:
   vibegen_grid:
@@ -21,4 +23,6 @@ models:
     intermediate:
       +materialized: view
     marts:
+      +materialized: table
+    spotify:
       +materialized: table

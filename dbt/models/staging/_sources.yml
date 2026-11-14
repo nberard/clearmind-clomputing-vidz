@@ -11,3 +11,7 @@ sources:
       - name: jobs
       - name: samples
       - name: sources
+      - name: spotify_streams
+        description: Spotify export, StreamingHistory_music_*.json (replaced on each load).
+      - name: spotify_library_tracks
+      - name: spotify_playlist_tracks

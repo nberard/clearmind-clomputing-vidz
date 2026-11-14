@@ -134,6 +134,28 @@ It's read-only and stops itself before Instagram escalates:
   Confirm in the Instagram app, then run `login` again.
 - **"Try again later":** pause 24 h. A second time means a full stop.
 
+## Spotify export
+
+Unzip your Spotify "Account data" export in `imports/`. That folder is
+git-ignored, because the export holds payment and address files.
+`elt/spotify_export.py` reads **only** `StreamingHistory_music_*.json`,
+`YourLibrary.json` and `Playlist*.json`, and never opens the personal files.
+
+```bash
+python elt/spotify_export.py "imports/Spotify Account Data" --target bigquery --project $GCP_PROJECT
+cd dbt && dbt build --profiles-dir . --select path:models/spotify
+```
+
+| Model | What it gives |
+|---|---|
+| `mart_spotify_top_artists` | Plays, tracks and minutes per artist (skips under 30 s excluded) |
+| `mart_spotify_listening_habits` | Plays by month and hour, for the summer vibe |
+| `mart_spotify_reference_tracks` | Most replayed, liked and playlisted tracks, with `in_reggae_playlist` and an `affinity_score`. These are the style references for the original music |
+
+The export has no genres, so a track counts as reggae when it's in a playlist
+whose name mentions reggae, roots, dub, ska, dancehall... (dbt variable
+`reggae_playlist_pattern`).
+
 ## Data stack: Python → BigQuery → dbt, orchestrated by Airflow
 
 ```

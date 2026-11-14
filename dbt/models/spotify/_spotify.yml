@@ -1,0 +1,15 @@
+version: 2
+
+models:
+  - name: stg_spotify__streams
+    columns:
+      - name: played_at
+        data_tests: [not_null]
+  - name: mart_spotify_top_artists
+    columns:
+      - name: artist_name
+        data_tests: [unique, not_null]
+  - name: mart_spotify_reference_tracks
+    description: >
+      Most replayed / liked / playlisted tracks. Filter on in_reggae_playlist
+      and sort by affinity_score to pick the style references.
