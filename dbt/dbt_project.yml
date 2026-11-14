@@ -14,7 +14,7 @@ vars:
   # the previous stage are still finishing)
   stage_warmup_share: 0.3
   # playlists whose name matches this (lowercase regex) count as reggae
-  reggae_playlist_pattern: 'reggae|roots|dub|ska|dancehall|rocksteady|lovers rock'
+  reggae_playlist_pattern: 'reggae|ray ?gay|roots|dub|ska|dancehall|rocksteady|lovers rock'
 
 models:
   vibegen_grid:
