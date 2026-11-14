@@ -10,3 +10,6 @@ dbt/logs/
 logs/
 dbt/.user.yml
 wasm-kernel/target/
+
+# Personal data exports (Spotify, Instagram...): never commit
+imports/
