@@ -42,6 +42,9 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       # Light settings for a small VPS (~4 GB RAM shared with other services)
       AIRFLOW__WEBSERVER__WORKERS: "1"
+      # Permission sync rewrites hundreds of rows in SQLite at every start
+      # (several minutes here). Roles already exist after the first start.
+      AIRFLOW__WEBSERVER__UPDATE_FAB_PERMS: "false"
       AIRFLOW__WEBSERVER__WEB_SERVER_WORKER_TIMEOUT: "300"
       AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: "300"
       AIRFLOW__CORE__PARALLELISM: "4"
